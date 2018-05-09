@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:metadata="http://www.mulesoft.org/schema/mule/metadata" xmlns:tracking="http://www.mulesoft.org/schema/mule/ee/tracking" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:spring="http://www.springframework.org/schema/beans" xmlns:json="http://www.mulesoft.org/schema/mule/json" xmlns:sfdc="http://www.mulesoft.org/schema/mule/sfdc" xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:core="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/json http://www.mulesoft.org/schema/mule/json/current/mule-json.xsd
+http://www.mulesoft.org/schema/mule/sfdc http://www.mulesoft.org/schema/mule/sfdc/current/mule-sfdc.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd">
+    <flow name="sys-sfdc-query-multi-launcher">
+        <expression-component doc:name="counter vars"><![CDATA[flowVars.sfdcBulkQueryPageSize = ${sfdc.bulk.query.page.size};
+flowVars.sfdcBulkQueryPagecounter = 0;]]></expression-component>
+        <set-variable variableName="queryResultsList" value="#[dw('[]')]" mimeType="application/java" doc:name="var queryResultsList" doc:description="Intilialize responderTraining List"/>
+        <foreach collection="flowVars.sfdcConfigMap.rowsToProcess" batchSize="${sfdc.bulk.query.page.size}" doc:name="For Each">
+            <flow-ref name="sys-sfdc-query-multi" doc:name="sfdc multi query"/>
+        </foreach>
+    </flow>
+    
+    
+    <flow name="sys-sfdc-query-multi">
+        <logger message="#['[ Rows '+flowVars.sfdcBulkQueryPagecounter+' - ' + (flowVars.sfdcBulkQueryPagecounter + flowVars.sfdcBulkQueryPageSize) +'] SFDC operation [multiple query]'] " level="INFO" doc:name="info"/>
+        <dw:transform-message doc:name="build sfdc query list" metadata:id="dbff1d12-557b-4814-aab3-21f61f778bd8">
+            <dw:input-payload doc:sample="sample_data\aglearn_learner_data.json" mimeType="application/java"/>
+            <dw:set-variable variableName="sfdcQuery"><![CDATA[%dw 1.0
+ %output application/java
+ 
+ %var myDynamicField = flowVars.sfdcConfigMap.csvMapKey
+ %var listOfIdToCheck = payload."$(myDynamicField)"
+ ---
+
+ 'SELECT ' ++ flowVars.sfdcConfigMap.sfdc_query_select_field ++ ' , ' ++ flowVars.sfdcConfigMap.sfdc_query_where_field ++  
+' FROM ' ++ flowVars.sfdcConfigMap.sfdc_query_from_object ++ 
+' WHERE ' ++ flowVars.sfdcConfigMap.sfdc_query_where_field ++
+' IN (' ++
+  ((listOfIdToCheck map ("'" ++ trim $ default '' ++ "'")) joinBy ",") ++
+  ')']]></dw:set-variable>
+            <!--             <dw:input-payload doc:sample="sample_data\aglearn_learner_data.json" mimeType="application/json"/> -->
+        </dw:transform-message>
+<!--         <logger message="#[flowVars.sfdcQuery]" level="INFO" doc:name="Logger"/> -->
+        <sfdc:query config-ref="Salesforce__Basic_Authentication" query="#[flowVars.sfdcQuery]" doc:name="bulk query"/>
+        <dw:transform-message doc:name="aggregate">
+            <dw:input-payload mimeType="application/java"/>
+            <dw:set-variable variableName="queryResultsList"><![CDATA[%dw 1.0
+ %output application/java
+ ---
+ (flowVars.queryResultsList default []) ++ (payload default [])]]></dw:set-variable>
+        </dw:transform-message>
+
+        <expression-component doc:name="update pages"><![CDATA[flowVars.sfdcBulkQueryPagecounter = flowVars.sfdcBulkQueryPagecounter + flowVars.sfdcBulkQueryPageSize;]]></expression-component>
+        <catch-exception-strategy doc:name="Catch Exception Strategy">
+            <expression-component doc:name="update paging vars"><![CDATA[flowVars.sfdcBulkQueryPagecounter = flowVars.sfdcBulkQueryPagecounter + flowVars.sfdcBulkQueryPageSize;]]></expression-component>
+            <logger message="#['[SFDC query error] in query:' +flowVars.sfdcQuery]" level="ERROR" doc:name="Logger"/>
+        </catch-exception-strategy>
+    </flow>
+
+    <flow name="sys-sfdc-responder_Training_query_uc06">
+        <set-variable variableName="queryResultsList" value="#[dw('[]')]" mimeType="application/java" doc:name="var queryResultsList" doc:description="Intilialize responderTraining List"/>
+
+
+        <dw:transform-message doc:name="prepare rows to update" metadata:id="43810020-3d4a-4700-b9ea-949089305f63">
+            <dw:input-payload mimeType="application/java"/>
+            <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+flowVars.finalListMatchingCourses map ((payload01 , indexOfPayload01) -> {
+	 "contactSfdcId": payload01.contactSfdcId,
+     "AgLearnTrainingSfdcId": payload01.AgLearnTrainingSfdcId
+     
+})]]></dw:set-payload>
+        </dw:transform-message>
+        <foreach batchSize="50" doc:name="For Each" doc:description="Iterate records with Batch size 100">
+            <dw:transform-message doc:name="Transform Message : Create Where Clause" metadata:id="bc8d7cbb-a191-4356-bed3-ab5491d11b93">
+                <dw:input-payload doc:sample="sample_data\MyPojo.dwl" mimeType="application/java"/>
+                <dw:set-payload><![CDATA[%dw 1.0
+ %output application/java
+ ---
+ payload map ("( EQS_Responder__c = '" ++ trim ($.contactSfdcId replace "'" with "\'" default "") 
+ 	++ "' and EQS_Training__c = '" ++ trim  (( ($.AgLearnTrainingSfdcId default "") replace "\\" with "\\\\\\") replace "'" with "\'"  ) ++ "')"
+ ) joinBy " OR "
+ 
+]]></dw:set-payload>
+            </dw:transform-message>
+<!--             <logger message="select Id from EQS_Responder_Training__c  WHERE (#[payload])" level="INFO" doc:name="info"/> -->
+            <sfdc:query config-ref="Salesforce__Basic_Authentication" query="dsql:select Id,EQS_Training__c,EQS_Responder__c from EQS_Responder_Training__c  WHERE (#[payload])" doc:name="Query EQS_Responder_Training__c"/>
+            <dw:transform-message doc:name="aggregate">
+                <dw:input-payload mimeType="application/java"/>
+                <dw:set-variable variableName="queryResultsList"><![CDATA[%dw 1.0
+ %output application/java
+ ---
+ (flowVars.queryResultsList default []) ++ (payload default [])]]></dw:set-variable>
+            </dw:transform-message>
+        </foreach>
+        <logger message="#['Found [ '+flowVars.queryResultsList.size()+' ] matches in existing EQS Responder AgLearn Training']" level="INFO" doc:name="Logger"/>
+    </flow>
+
+
+
+    
+</mule>
