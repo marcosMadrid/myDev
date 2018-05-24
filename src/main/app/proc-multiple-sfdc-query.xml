@@ -9,18 +9,30 @@ http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee
 http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd">
     <flow name="sfdc-multi-query">
         <dw:transform-message doc:name="create dummy list of users">
+         	<dw:input-payload mimeType="application/java"/>
             <dw:set-variable variableName="listOfUsers"><![CDATA[%dw 1.0
 %output application/java
 ---
 [
 	{
 		id:"1",
-		name:"Han",
+		name:"MICHAEL WATSON",
 		surname:"Solo"
 	},
 	{
 		id:"2",
-		name:"Luke",
+		name:"SAMANTHA SIMON",
+		surname:"Skywalker"
+	},	
+	{
+		id:"2",
+		name:"A TEST 1 VAN DER SCHRAAF",
+		surname:"Skywalker"
+	},
+		
+	{
+		id:"3",
+		name:"ANTHONY SHEA",
 		surname:"Skywalker"
 	}
 	
@@ -37,14 +49,16 @@ http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/m
 	csvMapKey:'name',
 	
 	//these are fields inside SFDC Contact's Object'
-	sfdc_query_select_field:'Id,Name,Surname',
+	sfdc_query_select_field:'Id, Email',
 	sfdc_query_from_object:'Contact',
-	sfdc_query_where_field:'Name'
+	sfdc_query_where_field:'Name',
+	results:[],
+	errors:[]
 }]]></dw:set-variable>
         </dw:transform-message>
-        <enricher source="#[flowVars.sfdcConfigMap.auxSfdcIdResultList]" target="#[flowVars.sfdcBulkQueryResults]" doc:name="result to sfdcBulkQueryResults">
+        <enricher source="#[flowVars.sfdcConfigMap.auxSfdcIdResultList]" target="#[flowVars.sfdcConfigMap]" doc:name="result to sfdcConfigMap">
             <flow-ref name="sys-sfdc-query-multi-launcher" doc:name="multi sfdc query"/>
         </enricher>
-        <logger message="#['Found ['+flowVars.sfdcBulkQueryResults.size()+'] matches of AglearnID in SFDC Contact']" level="INFO" doc:name="info"/>
+        <logger message="#['Found [] matches of AglearnID in SFDC Contact']" level="INFO" doc:name="info"/>
     </flow>
 </mule>

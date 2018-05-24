@@ -10,6 +10,8 @@ http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/cor
         <spring:import resource="classpath:sys-sfdc-multi.xml"/>
     </spring:beans>
     <munit:test name="multi-query-test" description="Test">
+        <logger message="starting test" level="INFO" doc:name="start"/>
         <flow-ref name="sfdc-multi-query" doc:name="sfdc-multi-query"/>
+        <logger message="test completed" level="INFO" doc:name="end"/>
     </munit:test>
 </mule>

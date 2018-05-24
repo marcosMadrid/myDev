@@ -7,17 +7,25 @@ http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee
 http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
 http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/mule/ee/tracking/current/mule-tracking-ee.xsd">
     <flow name="sys-sfdc-query-multi-launcher">
-        <expression-component doc:name="counter vars"><![CDATA[flowVars.sfdcBulkQueryPageSize = ${sfdc.bulk.query.page.size};
-flowVars.sfdcBulkQueryPagecounter = 0;]]></expression-component>
-        <set-variable variableName="queryResultsList" value="#[dw('[]')]" mimeType="application/java" doc:name="var queryResultsList" doc:description="Intilialize responderTraining List"/>
+        <dw:transform-message doc:name="counterVars">
+        	<dw:input-payload mimeType="application/java"/>
+            <dw:set-variable variableName="countersMap"><![CDATA[%dw 1.0
+%output application/java
+---
+{
+	sfdcBulkQueryPageSize : p('sfdc.bulk.query.page.size') as :number default 500,
+	sfdcBulkQueryPagecounter : 0
+}]]></dw:set-variable>
+        </dw:transform-message>
         <foreach collection="flowVars.sfdcConfigMap.rowsToProcess" batchSize="${sfdc.bulk.query.page.size}" doc:name="For Each">
             <flow-ref name="sys-sfdc-query-multi" doc:name="sfdc multi query"/>
         </foreach>
+        <logger message="#['SFDC operation [multiple query] found ['+flowVars.sfdcConfigMap.results.size()+'] matches'] " level="INFO" doc:name="info results"/>
     </flow>
     
     
     <flow name="sys-sfdc-query-multi">
-        <logger message="#['[ Rows '+flowVars.sfdcBulkQueryPagecounter+' - ' + (flowVars.sfdcBulkQueryPagecounter + flowVars.sfdcBulkQueryPageSize) +'] SFDC operation [multiple query]'] " level="INFO" doc:name="info"/>
+        <logger message="#['[Rows '+flowVars.countersMap.sfdcBulkQueryPagecounter+' - ' + (flowVars.countersMap.sfdcBulkQueryPagecounter + flowVars.countersMap.sfdcBulkQueryPageSize) +'] SFDC operation [multiple query]'] " level="INFO" doc:name="info"/>
         <dw:transform-message doc:name="build sfdc query list" metadata:id="dbff1d12-557b-4814-aab3-21f61f778bd8">
             <dw:input-payload doc:sample="sample_data\aglearn_learner_data.json" mimeType="application/java"/>
             <dw:set-variable variableName="sfdcQuery"><![CDATA[%dw 1.0
@@ -37,15 +45,31 @@ flowVars.sfdcBulkQueryPagecounter = 0;]]></expression-component>
         </dw:transform-message>
 <!--         <logger message="#[flowVars.sfdcQuery]" level="INFO" doc:name="Logger"/> -->
         <sfdc:query config-ref="Salesforce__Basic_Authentication" query="#[flowVars.sfdcQuery]" doc:name="bulk query"/>
-        <dw:transform-message doc:name="aggregate">
+        <dw:transform-message doc:name="aggregate results">
             <dw:input-payload mimeType="application/java"/>
-            <dw:set-variable variableName="queryResultsList"><![CDATA[%dw 1.0
+            <dw:set-variable variableName="sfdcConfigMap"><![CDATA[%dw 1.0
  %output application/java
  ---
- (flowVars.queryResultsList default []) ++ (payload default [])]]></dw:set-variable>
+ (flowVars.sfdcConfigMap default []) ++ 
+ 
+ {
+ 	results: (flowVars.sfdcConfigMap.results ++ payload) default []
+ }]]></dw:set-variable>
+        </dw:transform-message>
+        <dw:transform-message doc:name="counterVars update">
+        	<dw:input-payload mimeType="application/java"/>
+            <dw:set-variable variableName="countersMap"><![CDATA[%dw 1.0
+%output application/java
+---
+(flowVars.countersMap default []) ++ 
+
+{
+	
+	sfdcBulkQueryPagecounter : flowVars.countersMap.sfdcBulkQueryPagecounter + flowVars.countersMap.sfdcBulkQueryPageSize
+}
+]]></dw:set-variable>
         </dw:transform-message>
 
-        <expression-component doc:name="update pages"><![CDATA[flowVars.sfdcBulkQueryPagecounter = flowVars.sfdcBulkQueryPagecounter + flowVars.sfdcBulkQueryPageSize;]]></expression-component>
         <catch-exception-strategy doc:name="Catch Exception Strategy">
             <expression-component doc:name="update paging vars"><![CDATA[flowVars.sfdcBulkQueryPagecounter = flowVars.sfdcBulkQueryPagecounter + flowVars.sfdcBulkQueryPageSize;]]></expression-component>
             <logger message="#['[SFDC query error] in query:' +flowVars.sfdcQuery]" level="ERROR" doc:name="Logger"/>
