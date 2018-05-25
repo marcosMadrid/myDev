@@ -20,27 +20,30 @@ http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/m
         <foreach collection="flowVars.sfdcConfigMap.rowsToProcess" batchSize="${sfdc.bulk.query.page.size}" doc:name="For Each">
             <flow-ref name="sys-sfdc-query-multi" doc:name="sfdc multi query"/>
         </foreach>
-        <logger message="#['SFDC operation [multiple query] found ['+flowVars.sfdcConfigMap.results.size()+'] matches'] " level="INFO" doc:name="info results"/>
+        <logger message="#['SFDC operation [multiple query] found ['+flowVars.sfdcConfigMap.results.size()+'] matches and ['+flowVars.sfdcConfigMap.errors.size()+'] errors'] " level="INFO" doc:name="info results"/>
     </flow>
     
     
     <flow name="sys-sfdc-query-multi">
-        <logger message="#['[Rows '+flowVars.countersMap.sfdcBulkQueryPagecounter+' - ' + (flowVars.countersMap.sfdcBulkQueryPagecounter + flowVars.countersMap.sfdcBulkQueryPageSize) +'] SFDC operation [multiple query]'] " level="INFO" doc:name="info"/>
+        <logger message="#['[SFDC multiple query] [Select operation in Rows '+flowVars.countersMap.sfdcBulkQueryPagecounter+' - ' + (flowVars.countersMap.sfdcBulkQueryPagecounter + flowVars.countersMap.sfdcBulkQueryPageSize) +']'] " level="INFO" doc:name="info"/>
         <dw:transform-message doc:name="build sfdc query list" metadata:id="dbff1d12-557b-4814-aab3-21f61f778bd8">
             <dw:input-payload doc:sample="sample_data\aglearn_learner_data.json" mimeType="application/java"/>
             <dw:set-variable variableName="sfdcQuery"><![CDATA[%dw 1.0
  %output application/java
  
- %var myDynamicField = flowVars.sfdcConfigMap.csvMapKey
- %var listOfIdToCheck = payload."$(myDynamicField)"
+ %var myDynamicField = flowVars.sfdcConfigMap.csvMapKey default null
+ %var listOfIdToCheck = payload."$(myDynamicField)" default null
  ---
 
  'SELECT ' ++ flowVars.sfdcConfigMap.sfdc_query_select_field ++ ' , ' ++ flowVars.sfdcConfigMap.sfdc_query_where_field ++  
 ' FROM ' ++ flowVars.sfdcConfigMap.sfdc_query_from_object ++ 
 ' WHERE ' ++ flowVars.sfdcConfigMap.sfdc_query_where_field ++
-' IN (' ++
+
+(' IN (' ++
   ((listOfIdToCheck map ("'" ++ trim $ default '' ++ "'")) joinBy ",") ++
-  ')']]></dw:set-variable>
+  ')'
+ ) when listOfIdToCheck != null otherwise ''
+]]></dw:set-variable>
             <!--             <dw:input-payload doc:sample="sample_data\aglearn_learner_data.json" mimeType="application/json"/> -->
         </dw:transform-message>
 <!--         <logger message="#[flowVars.sfdcQuery]" level="INFO" doc:name="Logger"/> -->
@@ -71,10 +74,99 @@ http://www.mulesoft.org/schema/mule/ee/tracking http://www.mulesoft.org/schema/m
         </dw:transform-message>
 
         <catch-exception-strategy doc:name="Catch Exception Strategy">
-            <expression-component doc:name="update paging vars"><![CDATA[flowVars.sfdcBulkQueryPagecounter = flowVars.sfdcBulkQueryPagecounter + flowVars.sfdcBulkQueryPageSize;]]></expression-component>
-            <logger message="#['[SFDC query error] in query:' +flowVars.sfdcQuery]" level="ERROR" doc:name="Logger"/>
+            <set-variable variableName="exceptionText" value="#[org.mule.util.ExceptionUtils.getRootCauseMessage(exception)]" doc:name="exceptionText"/>
+            <dw:transform-message doc:name="aggregate results">
+                <dw:input-payload mimeType="application/java"/>
+                <dw:set-variable variableName="sfdcConfigMap"><![CDATA[%dw 1.0
+ %output application/java
+ ---
+ (flowVars.sfdcConfigMap default []) ++ 
+ 
+ {
+ 	errors: (flowVars.sfdcConfigMap.errors ++ 
+ 		[
+ 			{
+ 			sfdcException:flowVars.exceptionText,
+ 			sfdcSoql:flowVars.sfdcQuery
+ 			}
+ 		]
+ 	) default []
+ }]]></dw:set-variable>
+            </dw:transform-message>
+            <dw:transform-message doc:name="counterVars update">
+                <dw:input-payload mimeType="application/java"/>
+                <dw:set-variable variableName="countersMap"><![CDATA[%dw 1.0
+%output application/java
+---
+(flowVars.countersMap default []) ++ 
+
+{
+	
+	sfdcBulkQueryPagecounter : flowVars.countersMap.sfdcBulkQueryPagecounter + flowVars.countersMap.sfdcBulkQueryPageSize
+}
+]]></dw:set-variable>
+            </dw:transform-message>
+
+            <logger message="#['[SFDC multiple query] Error while selecting rows ['+flowVars.exceptionText+']' ]" level="ERROR" doc:name="Logger"/>
         </catch-exception-strategy>
     </flow>
+    
+    <flow name="sys-sfdc-query-simple">
+        <logger message="#['SFDC operation [simple query]'] " level="INFO" doc:name="info"/>
+        <dw:transform-message doc:name="build sfdc query list" metadata:id="dbff1d12-557b-4814-aab3-21f61f778bd8">
+            <dw:input-payload doc:sample="sample_data\aglearn_learner_data.json" mimeType="application/java"/>
+            <dw:set-variable variableName="sfdcQuery"><![CDATA[%dw 1.0
+ %output application/java
+ 
+
+ ---
+
+ 'SELECT ' ++ flowVars.sfdcConfigMap.sfdc_query_select_field ++  
+' FROM ' ++ flowVars.sfdcConfigMap.sfdc_query_from_object ]]></dw:set-variable>
+            <!--             <dw:input-payload doc:sample="sample_data\aglearn_learner_data.json" mimeType="application/json"/> -->
+        </dw:transform-message>
+<!--         <logger message="#[flowVars.sfdcQuery]" level="INFO" doc:name="Logger"/> -->
+        <sfdc:query config-ref="Salesforce__Basic_Authentication" query="#[flowVars.sfdcQuery]" doc:name="bulk query"/>
+        <dw:transform-message doc:name="aggregate results">
+            <dw:input-payload mimeType="application/java"/>
+            <dw:set-variable variableName="sfdcConfigMap"><![CDATA[%dw 1.0
+ %output application/java
+ ---
+ (flowVars.sfdcConfigMap default []) ++ 
+ 
+ {
+ 	results: (flowVars.sfdcConfigMap.results ++ payload) default []
+ }]]></dw:set-variable>
+        </dw:transform-message>
+        <logger message="#['SFDC operation [simple query] found ['+flowVars.sfdcConfigMap.results.size()+'] matches'] " level="INFO" doc:name="info results"/>
+
+
+         <catch-exception-strategy doc:name="Catch Exception Strategy">
+            <set-variable variableName="exceptionText" value="#[org.mule.util.ExceptionUtils.getRootCauseMessage(exception)]" doc:name="exceptionText"/>
+            <dw:transform-message doc:name="aggregate results">
+                <dw:input-payload mimeType="application/java"/>
+                <dw:set-variable variableName="sfdcConfigMap"><![CDATA[%dw 1.0
+ %output application/java
+ ---
+ (flowVars.sfdcConfigMap default []) ++ 
+ 
+ {
+ 	errors: (flowVars.sfdcConfigMap.errors ++ 
+ 		[
+ 			{
+ 			sfdcException:flowVars.exceptionText,
+ 			sfdcSoql:flowVars.sfdcQuery
+ 			}
+ 		]
+ 	) default []
+ }]]></dw:set-variable>
+            </dw:transform-message>
+             
+
+            <logger message="#['[SFDC simple query] Error while selecting rows ['+flowVars.exceptionText+']' ]" level="ERROR" doc:name="error info"/>
+        </catch-exception-strategy>
+    </flow>
+    
 
     <flow name="sys-sfdc-responder_Training_query_uc06">
         <set-variable variableName="queryResultsList" value="#[dw('[]')]" mimeType="application/java" doc:name="var queryResultsList" doc:description="Intilialize responderTraining List"/>

@@ -9,9 +9,16 @@ http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/cor
         <spring:import resource="classpath:proc-multiple-sfdc-query.xml"/>
         <spring:import resource="classpath:sys-sfdc-multi.xml"/>
     </spring:beans>
-    <munit:test name="multi-query-test" description="Test">
+    <munit:test name="multi-query-simple" description="Test">
         <logger message="starting test" level="INFO" doc:name="start"/>
-        <flow-ref name="sfdc-multi-query" doc:name="sfdc-multi-query"/>
+        <flow-ref name="proc-sfdc-simple-query" doc:name="sfdc-query-simple"/>
         <logger message="test completed" level="INFO" doc:name="end"/>
     </munit:test>
+    
+    <munit:test name="multi-query-multiple" description="Test">
+        <logger message="starting test" level="INFO" doc:name="start"/>
+        <flow-ref name="proc-sfdc-multi-query-with-input-data" doc:name="sfdc-query-simple"/>
+        <logger message="test completed" level="INFO" doc:name="end"/>
+    </munit:test>
+    
 </mule>
